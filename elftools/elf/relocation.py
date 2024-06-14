@@ -227,17 +227,19 @@ class RelocationHandler(object):
                 return relsection
         return None
 
-    def apply_section_relocations(self, stream, reloc_section):
+    def apply_section_relocations(self, stream, reloc_section, offset):
         """ Apply all relocations in reloc_section (a RelocationSection object)
             to the given stream, that contains the data of the section that is
             being relocated. The stream is modified as a result.
         """
         # The symbol table associated with this relocation section
         symtab = self.elffile.get_section(reloc_section['sh_link'])
+        to_modify = self.elffile.get_section(reloc_section['sh_info'])
+        data_percpu = self.elffile.get_section_index(".data..percpu")
         for reloc in reloc_section.iter_relocations():
-            self._do_apply_relocation(stream, reloc, symtab)
+            self._do_apply_relocation(stream, reloc, symtab, offset, to_modify['sh_addr'], {data_percpu})
 
-    def _do_apply_relocation(self, stream, reloc, symtab):
+    def _do_apply_relocation(self, stream, reloc, symtab, offset, vaddr, nonkaslr_sections):
         # Preparations for performing the relocation: obtain the value of
         # the symbol mentioned in the relocation, as well as the relocation
         # recipe which tells us how to actually perform it.
@@ -246,7 +248,15 @@ class RelocationHandler(object):
             raise ELFRelocationError(
                 'Invalid symbol reference in relocation: index %s' % (
                     reloc['r_info_sym']))
-        sym_value = symtab.get_symbol(reloc['r_info_sym'])['st_value']
+        sym = symtab.get_symbol(reloc['r_info_sym'])
+        if sym['st_shndx'] in nonkaslr_sections:
+            sym_value = sym['st_value']
+        else:
+            sym_value = sym['st_value'] + offset
+        r_offset = reloc['r_offset'] - vaddr
+        if reloc['r_offset'] == 0xffffffff81a228c1:
+            print(f"sym_value: {sym_value}")
+            print(f"offset: {offset}")
 
         reloc_type = reloc['r_info_type']
         recipe = None
@@ -290,8 +300,7 @@ class RelocationHandler(object):
             recipe = self._RELOCATION_RECIPES_LOONGARCH.get(reloc_type, None)
 
         if recipe is None:
-            raise ELFRelocationError(
-                    'Unsupported relocation type: %s' % reloc_type)
+            return
 
         # So now we have everything we need to actually perform the relocation.
         # Let's get to it:
@@ -314,20 +323,22 @@ class RelocationHandler(object):
         original_value = struct_parse(
             value_struct,
             stream,
-            stream_pos=reloc['r_offset'])
+            stream_pos=r_offset)
         # 2. Apply the relocation to the value, acting according to the recipe
         relocated_value = recipe.calc_func(
             value=original_value,
             sym_value=sym_value,
-            offset=reloc['r_offset'],
+            offset=reloc['r_offset'] + offset,
             addend=reloc['r_addend'] if recipe.has_addend else 0)
         # 3. Write the relocated value back into the stream
-        stream.seek(reloc['r_offset'])
+        stream.seek(r_offset)
 
         # Make sure the relocated value fits back by wrapping it around. This
         # looks like a problem, but it seems to be the way this is done in
         # binutils too.
         relocated_value = relocated_value % (2 ** (recipe.bytesize * 8))
+        if reloc['r_offset'] == 0xffffffff81a228c1:
+            print(relocated_value)
         value_struct.build_stream(relocated_value, stream)
 
     # Relocations are represented by "recipes". Each recipe specifies:
