@@ -254,9 +254,6 @@ class RelocationHandler(object):
         else:
             sym_value = sym['st_value'] + offset
         r_offset = reloc['r_offset'] - vaddr
-        if reloc['r_offset'] == 0xffffffff81a228c1:
-            print(f"sym_value: {sym_value}")
-            print(f"offset: {offset}")
 
         reloc_type = reloc['r_info_type']
         recipe = None
@@ -337,8 +334,6 @@ class RelocationHandler(object):
         # looks like a problem, but it seems to be the way this is done in
         # binutils too.
         relocated_value = relocated_value % (2 ** (recipe.bytesize * 8))
-        if reloc['r_offset'] == 0xffffffff81a228c1:
-            print(relocated_value)
         value_struct.build_stream(relocated_value, stream)
 
     # Relocations are represented by "recipes". Each recipe specifies:
