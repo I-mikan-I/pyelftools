@@ -235,9 +235,9 @@ class RelocationHandler(object):
         # The symbol table associated with this relocation section
         symtab = self.elffile.get_section(reloc_section['sh_link'])
         to_modify = self.elffile.get_section(reloc_section['sh_info'])
-        data_percpu = self.elffile.get_section_index(".data..percpu")
+        data_percpu = self.elffile.get_section_by_name(".data..percpu")
         for reloc in reloc_section.iter_relocations():
-            self._do_apply_relocation(stream, reloc, symtab, offset, to_modify['sh_addr'], {data_percpu})
+            self._do_apply_relocation(stream, reloc, symtab, offset, to_modify['sh_addr'], {(data_percpu['sh_addr'], data_percpu['sh_addr'] + data_percpu['sh_size'])})
 
     def _do_apply_relocation(self, stream, reloc, symtab, offset, vaddr, nonkaslr_sections):
         # Preparations for performing the relocation: obtain the value of
@@ -249,7 +249,7 @@ class RelocationHandler(object):
                 'Invalid symbol reference in relocation: index %s' % (
                     reloc['r_info_sym']))
         sym = symtab.get_symbol(reloc['r_info_sym'])
-        if sym['st_shndx'] in nonkaslr_sections:
+        if any(sym['st_value'] >= l and sym['st_value'] <= r for l, r in nonkaslr_sections):
             sym_value = sym['st_value']
         else:
             sym_value = sym['st_value'] + offset
